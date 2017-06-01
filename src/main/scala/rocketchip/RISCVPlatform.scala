@@ -4,153 +4,126 @@ package rocketchip
 
 import Chisel._
 import config._
+import coreplex._
 import diplomacy._
+import jtag.JTAGIO
 import uncore.tilelink2._
 import uncore.devices._
 import util._
-import jtag.JTAGIO
-import coreplex._
 
-// System with JTAG DTM Instantiated inside. JTAG interface is
-// exported outside.
-
-trait PeripheryJTAGDTM extends HasTopLevelNetworks {
-  val module: PeripheryJTAGDTMModule
+/** All the traits defined in this file assume that they are being mixed in
+  * to a system that has a standard RISCV-based coreplex platform.
+  */
+trait HasCoreplexRISCVPlatform {
   val coreplex: CoreplexRISCVPlatform
 }
 
-trait PeripheryJTAGDTMBundle extends HasTopLevelNetworksBundle {
-  val outer: PeripheryJTAGDTM
-
-  val jtag = new JTAGIO(hasTRSTn = false).flip
-  val jtag_reset = Bool(INPUT)
-  val jtag_mfr_id = UInt(INPUT, 11)
-
+/** Adds JTAG DTM to system, and exports JTAG interface. */
+trait HasPeripheryJTAGDTM extends HasSystemNetworks with HasCoreplexRISCVPlatform {
+  val module: HasPeripheryJTAGDTMModuleImp
 }
 
-trait PeripheryJTAGDTMModule extends HasTopLevelNetworksModule {
-  val outer: PeripheryJTAGDTM
-  val io: PeripheryJTAGDTMBundle
+trait HasPeripheryJTAGDTMModuleImp extends LazyMultiIOModuleImp {
+  val outer: HasPeripheryJTAGDTM
+
+  val jtag = IO(new JTAGIO(hasTRSTn = false).flip)
+  val jtag_reset = IO(Bool(INPUT))
+  val jtag_mfr_id = IO(UInt(INPUT, 11))
 
   val dtm = Module (new DebugTransportModuleJTAG(p(DMKey).nDMIAddrSize, p(JtagDTMKey)))
-  dtm.io.jtag <> io.jtag
+  dtm.io.jtag <> jtag
   
-  dtm.clock             := io.jtag.TCK
-  dtm.io.jtag_reset     := io.jtag_reset
-  dtm.io.jtag_mfr_id    := io.jtag_mfr_id
+  dtm.clock             := jtag.TCK
+  dtm.io.jtag_reset     := jtag_reset
+  dtm.io.jtag_mfr_id    := jtag_mfr_id
   dtm.reset             := dtm.io.fsmReset
 
   outer.coreplex.module.io.debug.dmi <> dtm.io.dmi
-  outer.coreplex.module.io.debug.dmiClock := io.jtag.TCK
-  outer.coreplex.module.io.debug.dmiReset := ResetCatchAndSync(io.jtag.TCK, io.jtag_reset, "dmiResetCatch")
-
+  outer.coreplex.module.io.debug.dmiClock := jtag.TCK
+  outer.coreplex.module.io.debug.dmiReset := ResetCatchAndSync(jtag.TCK, jtag_reset, "dmiResetCatch")
 }
 
-// System with Debug Module Interface Only. Any sort of DTM
-// can be connected outside. DMI Clock and Reset must be provided.
-
-trait PeripheryDMI extends HasTopLevelNetworks {
-  val module: PeripheryDMIModule
-  val coreplex: CoreplexRISCVPlatform
+/** Adds Debug Module Interface (DMI) to systeme. Any sort of DTM
+  * can be connected outside. DMI Clock and Reset must be provided.
+  */
+trait HasPeripheryDMI extends HasSystemNetworks with HasCoreplexRISCVPlatform {
+  val module: HasPeripheryDMIModuleImp
 }
 
-trait PeripheryDMIBundle extends HasTopLevelNetworksBundle {
-  val outer: PeripheryDMI
+trait HasPeripheryDMIModuleImp extends LazyMultiIOModuleImp {
+  val outer: HasPeripheryDMI
+  val debug = IO(new ClockedDMIIO().flip)
 
-  val debug = new ClockedDMIIO().flip
+  outer.coreplex.module.io.debug <> debug
 }
 
-trait PeripheryDMIModule extends HasTopLevelNetworksModule {
-  val outer: PeripheryDMI
-  val io: PeripheryDMIBundle
-
-  outer.coreplex.module.io.debug <> io.debug
+/** Add DMI or JTAG interface to system based on a global parameter */
+trait HasPeripheryDebug extends HasSystemNetworks with HasCoreplexRISCVPlatform {
+  val module: HasPeripheryDebugModuleImp
 }
 
-// System with DMI or JTAG interface based on a parameter
+trait HasPeripheryDebugModuleImp extends LazyMultiIOModuleImp {
+  val outer: HasPeripheryDebug
 
-trait PeripheryDebug extends HasTopLevelNetworks {
-  val module: PeripheryDebugModule
-  val coreplex: CoreplexRISCVPlatform
-}
+  val debug = (!p(IncludeJtagDTM)).option(IO(new ClockedDMIIO().flip))
 
-trait PeripheryDebugBundle extends HasTopLevelNetworksBundle {
-  val outer: PeripheryDebug
+  val jtag        = (p(IncludeJtagDTM)).option(IO(new JTAGIO(hasTRSTn = false).flip))
+  val jtag_reset  = (p(IncludeJtagDTM)).option(IO(Bool(INPUT)))
+  val jtag_mfr_id = (p(IncludeJtagDTM)).option(IO(UInt(INPUT, 11)))
 
-  val debug = (!p(IncludeJtagDTM)).option(new ClockedDMIIO().flip)
+  val ndreset = IO(Bool(OUTPUT))
+  val dmactive = IO(Bool(OUTPUT))
 
-  val jtag        = (p(IncludeJtagDTM)).option(new JTAGIO(hasTRSTn = false).flip)
-  val jtag_reset  = (p(IncludeJtagDTM)).option(Bool(INPUT))
-  val jtag_mfr_id = (p(IncludeJtagDTM)).option(UInt(INPUT, 11))
+  debug.foreach { dbg => outer.coreplex.module.io.debug <> dbg }
 
-  val ndreset = Bool(OUTPUT)
-  val dmactive = Bool(OUTPUT)
-}
-
-trait PeripheryDebugModule extends HasTopLevelNetworksModule {
-  val outer: PeripheryDebug
-  val io: PeripheryDebugBundle
-
-  io.debug.foreach { dbg => outer.coreplex.module.io.debug <> dbg }
-
-  val dtm = if (io.jtag.isDefined) Some[DebugTransportModuleJTAG](Module (new DebugTransportModuleJTAG(p(DMKey).nDMIAddrSize, p(JtagDTMKey)))) else None
+  val dtm = jtag.map { _ => Module(new DebugTransportModuleJTAG(p(DMKey).nDMIAddrSize, p(JtagDTMKey))) }
   dtm.foreach { dtm =>
-    dtm.io.jtag <> io.jtag.get
+    dtm.io.jtag <> jtag.get
 
-    dtm.clock          := io.jtag.get.TCK
-    dtm.io.jtag_reset  := io.jtag_reset.get
-    dtm.io.jtag_mfr_id := io.jtag_mfr_id.get
+    dtm.clock          := jtag.get.TCK
+    dtm.io.jtag_reset  := jtag_reset.get
+    dtm.io.jtag_mfr_id := jtag_mfr_id.get
     dtm.reset          := dtm.io.fsmReset
 
     outer.coreplex.module.io.debug.dmi <> dtm.io.dmi
-    outer.coreplex.module.io.debug.dmiClock := io.jtag.get.TCK
-    outer.coreplex.module.io.debug.dmiReset := ResetCatchAndSync(io.jtag.get.TCK, io.jtag_reset.get, "dmiResetCatch")
+    outer.coreplex.module.io.debug.dmiClock := jtag.get.TCK
+    outer.coreplex.module.io.debug.dmiReset := ResetCatchAndSync(jtag.get.TCK, jtag_reset.get, "dmiResetCatch")
   }
 
-  io.ndreset  := outer.coreplex.module.io.ndreset
-  io.dmactive := outer.coreplex.module.io.dmactive
-
+  ndreset  := outer.coreplex.module.io.ndreset
+  dmactive := outer.coreplex.module.io.dmactive
 }
 
-/// Real-time clock is based on RTCPeriod relative to Top clock
-
-trait PeripheryCounter extends HasTopLevelNetworks {
-  val module: PeripheryCounterModule
-  val coreplex: CoreplexRISCVPlatform
+/** Real-time clock is based on RTCPeriod relative to system clock.
+  * Note: nothing about this is diplomatic, all the work is done in the ModuleImp
+  */
+trait HasPeripheryRTCCounter extends HasSystemNetworks with HasCoreplexRISCVPlatform {
+  val module: HasPeripheryRTCCounterModuleImp
 }
 
-trait PeripheryCounterBundle extends HasTopLevelNetworksBundle {
-  val outer: PeripheryCounter
+trait HasPeripheryRTCCounterModuleImp extends LazyMultiIOModuleImp {
+  val outer: HasPeripheryRTCCounter
+  val period = p(rocketchip.RTCPeriod)
+  val rtcCounter = RegInit(UInt(0, width = log2Up(period)))
+  val rtcWrap = rtcCounter === UInt(period-1)
+
+  rtcCounter := Mux(rtcWrap, UInt(0), rtcCounter + UInt(1))
+  outer.coreplex.module.io.rtcToggle := rtcCounter(log2Up(period)-1)
 }
 
-trait PeripheryCounterModule extends HasTopLevelNetworksModule {
-  val outer: PeripheryCounter
-  val io: PeripheryCounterBundle
-  
-  {
-    val period = p(rocketchip.RTCPeriod)
-    val rtcCounter = RegInit(UInt(0, width = log2Up(period)))
-    val rtcWrap = rtcCounter === UInt(period-1)
-    rtcCounter := Mux(rtcWrap, UInt(0), rtcCounter + UInt(1))
+/** Adds a boot ROM that contains the DTB describing the system's coreplex. */
+trait HasPeripheryBootROM extends HasSystemNetworks with HasCoreplexRISCVPlatform {
+  val bootrom_address = 0x10000
+  val bootrom_size    = 0x10000
+  val bootrom_hang    = 0x10040
+  private lazy val bootrom_contents = GenerateBootROM(coreplex.dtb)
+  val bootrom = LazyModule(new TLROM(bootrom_address, bootrom_size, bootrom_contents, true, peripheryBusConfig.beatBytes))
 
-    outer.coreplex.module.io.rtcToggle := rtcCounter(log2Up(period)-1)
-  }
+  bootrom.node := TLFragmenter(peripheryBusConfig.beatBytes, cacheBlockBytes)(peripheryBus.node)
 }
 
-/// Coreplex will power-on running at 0x1000 (BootROM)
-
-trait HardwiredResetVector extends HasTopLevelNetworks {
-  val module: HardwiredResetVectorModule
-  val coreplex: CoreplexRISCVPlatform
-}
-
-trait HardwiredResetVectorBundle extends HasTopLevelNetworksBundle {
-  val outer: HardwiredResetVector
-}
-
-trait HardwiredResetVectorModule extends HasTopLevelNetworksModule {
-  val outer: HardwiredResetVector
-  val io: HardwiredResetVectorBundle
-
-  outer.coreplex.module.io.resetVector := UInt(0x10040) // boot ROM: hang
+/** Coreplex will power-on running at 0x10040 (BootROM) */
+trait HasPeripheryBootROMModuleImp extends LazyMultiIOModuleImp {
+  val outer: HasPeripheryBootROM
+  outer.coreplex.module.io.resetVector := UInt(outer.bootrom_hang)
 }
