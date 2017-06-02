@@ -143,8 +143,6 @@ object LazyModule
 
 trait LazyModuleImpLike extends BaseModule
 {
-  val clock: Clock
-  val reset: Bool
   val wrapper: LazyModule
 
   // .module had better not be accessed while LazyModules are still being built!
@@ -158,8 +156,8 @@ trait LazyModuleImpLike extends BaseModule
   implicit val p = wrapper.p
 }
 
-abstract class LazyModuleImp(val wrapper: LazyModule) extends Module with  LazyModuleImpLike
+abstract class LazyModuleImp(val wrapper: LazyModule) extends Module with LazyModuleImpLike
 
-abstract class LazyMultiIOModuleImp(val wrapper: LazyModule) extends MultiIOModule with  LazyModuleImpLike
+abstract class LazyMultiIOModuleImp(val wrapper: LazyModule) extends MultiIOModule with LazyModuleImpLike
 
-abstract class LazyRawModuleImp(val wrapper: LazyModule) extends RawModule with  LazyModuleImpLike
+abstract class LazyRawModuleImp(val wrapper: LazyModule) extends RawModule with LazyModuleImpLike
