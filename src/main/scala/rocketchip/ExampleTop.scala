@@ -9,12 +9,12 @@ import rocketchip._
 
 /** Example system with periphery devices (w/o coreplex) */
 abstract class ExampleSystem(implicit p: Parameters) extends BaseSystem
-    with HasPeripheryErrorSlave
-    with HasPeripheryZeroSlave
     with HasPeripheryAsyncExtInterrupts
     with HasPeripheryMasterAXI4MemPort
     with HasPeripheryMasterAXI4MMIOPort
-    with HasPeripherySlaveAXI4Port {
+    with HasPeripherySlaveAXI4Port
+    with HasPeripheryErrorSlave
+    with HasPeripheryZeroSlave {
   override lazy val module = new ExampleSystemModule(this)
 }
 

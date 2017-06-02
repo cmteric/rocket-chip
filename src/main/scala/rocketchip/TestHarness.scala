@@ -16,24 +16,26 @@ class TestHarness()(implicit p: Parameters) extends Module {
   }
 
   val dut = Module(LazyModule(new ExampleRocketTop).module)
-  dut.reset := reset | dut.ndreset
+  dut.reset := reset | dut.io_ndreset
 
-  dut.interrupts := UInt(0)
+  dut.io_interrupts := UInt(0)
 
   val channels = p(coreplex.BankedL2Config).nMemoryChannels
-  if (channels > 0) Module(LazyModule(new SimAXIMem(channels)).module).io.axi4 <> dut.mem_axi4
+  if (channels > 0) Module(LazyModule(new SimAXIMem(channels)).module).io.axi4 <> dut.io_mem_axi4
 
-  if (!p(IncludeJtagDTM)) {
-    val dtm = Module(new SimDTM).connect(clock, reset, dut.debug.get, io.success)
-  } else {
-    val jtag = Module(new JTAGVPI).connect(dut.jtag.get, dut.jtag_reset.get, reset, io.success)
-    dut.jtag_mfr_id.get := p(JtagDTMKey).idcodeManufId.U(11.W)
+  dut.io_debug.foreach { d =>
+    val dtm = Module(new SimDTM).connect(clock, reset, d, io.success)
+  }
+
+  dut.io_jtag.foreach { j =>
+    val jtag = Module(new JTAGVPI).connect(j.jtag, j.reset, reset, io.success)
+    j.mfr_id := p(JtagDTMKey).idcodeManufId.U(11.W)
   }
 
   val mmio_sim = Module(LazyModule(new SimAXIMem(1, 4096)).module)
-  mmio_sim.io.axi4 <> dut.mmio_axi4
+  mmio_sim.io.axi4 <> dut.io_mmio_axi4
 
-  val l2_axi4 = dut.l2_frontend_bus_axi4(0)
+  val l2_axi4 = dut.io_l2_frontend_bus_axi4(0)
   l2_axi4.ar.valid := Bool(false)
   l2_axi4.aw.valid := Bool(false)
   l2_axi4.w .valid := Bool(false)

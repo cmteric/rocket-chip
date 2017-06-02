@@ -14,8 +14,8 @@ class TestHarness(implicit p: Parameters) extends Module {
   }
 
   val dut = Module(LazyModule(new GroundTestTop).module)
-  io.success := dut.success
+  io.success := dut.io_success
 
   val channels = p(coreplex.BankedL2Config).nMemoryChannels
-  if (channels > 0) Module(LazyModule(new SimAXIMem(channels)).module).io.axi4 <> dut.mem_axi4
+  if (channels > 0) Module(LazyModule(new SimAXIMem(channels)).module).io.axi4 <> dut.io_mem_axi4
 }

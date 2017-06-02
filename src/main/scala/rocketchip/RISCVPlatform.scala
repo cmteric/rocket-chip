@@ -23,24 +23,28 @@ trait HasPeripheryJTAGDTM extends HasSystemNetworks with HasCoreplexRISCVPlatfor
   val module: HasPeripheryJTAGDTMModuleImp
 }
 
+class SystemJTAGIO extends Bundle {
+  val jtag = new JTAGIO(hasTRSTn = false).flip
+  val reset = Bool(INPUT)
+  val mfr_id = UInt(INPUT, 11)
+}
+
 trait HasPeripheryJTAGDTMModuleImp extends LazyMultiIOModuleImp {
   val outer: HasPeripheryJTAGDTM
 
-  val jtag = IO(new JTAGIO(hasTRSTn = false).flip)
-  val jtag_reset = IO(Bool(INPUT))
-  val jtag_mfr_id = IO(UInt(INPUT, 11))
+  val io_jtag = IO(new SystemJTAGIO)
 
   val dtm = Module (new DebugTransportModuleJTAG(p(DMKey).nDMIAddrSize, p(JtagDTMKey)))
-  dtm.io.jtag <> jtag
+  dtm.io.jtag <> io_jtag.jtag
   
-  dtm.clock             := jtag.TCK
-  dtm.io.jtag_reset     := jtag_reset
-  dtm.io.jtag_mfr_id    := jtag_mfr_id
+  dtm.clock             := io_jtag.jtag.TCK
+  dtm.io.jtag_reset     := io_jtag.reset
+  dtm.io.jtag_mfr_id    := io_jtag.mfr_id
   dtm.reset             := dtm.io.fsmReset
 
   outer.coreplex.module.io.debug.dmi <> dtm.io.dmi
-  outer.coreplex.module.io.debug.dmiClock := jtag.TCK
-  outer.coreplex.module.io.debug.dmiReset := ResetCatchAndSync(jtag.TCK, jtag_reset, "dmiResetCatch")
+  outer.coreplex.module.io.debug.dmiClock := io_jtag.jtag.TCK
+  outer.coreplex.module.io.debug.dmiReset := ResetCatchAndSync(io_jtag.jtag.TCK, io_jtag.reset, "dmiResetCatch")
 }
 
 /** Adds Debug Module Interface (DMI) to systeme. Any sort of DTM
@@ -52,9 +56,9 @@ trait HasPeripheryDMI extends HasSystemNetworks with HasCoreplexRISCVPlatform {
 
 trait HasPeripheryDMIModuleImp extends LazyMultiIOModuleImp {
   val outer: HasPeripheryDMI
-  val debug = IO(new ClockedDMIIO().flip)
+  val io_debug = IO(new ClockedDMIIO().flip)
 
-  outer.coreplex.module.io.debug <> debug
+  outer.coreplex.module.io.debug <> io_debug
 }
 
 /** Add DMI or JTAG interface to system based on a global parameter */
@@ -65,33 +69,30 @@ trait HasPeripheryDebug extends HasSystemNetworks with HasCoreplexRISCVPlatform 
 trait HasPeripheryDebugModuleImp extends LazyMultiIOModuleImp {
   val outer: HasPeripheryDebug
 
-  val debug = (!p(IncludeJtagDTM)).option(IO(new ClockedDMIIO().flip))
+  val io_debug = (!p(IncludeJtagDTM)).option(IO(new ClockedDMIIO().flip))
+  val io_jtag  = (p(IncludeJtagDTM)).option(IO(new SystemJTAGIO))
+  val io_ndreset = IO(Bool(OUTPUT))
+  val io_dmactive = IO(Bool(OUTPUT))
 
-  val jtag        = (p(IncludeJtagDTM)).option(IO(new JTAGIO(hasTRSTn = false).flip))
-  val jtag_reset  = (p(IncludeJtagDTM)).option(IO(Bool(INPUT)))
-  val jtag_mfr_id = (p(IncludeJtagDTM)).option(IO(UInt(INPUT, 11)))
+  io_debug.foreach { dbg => outer.coreplex.module.io.debug <> dbg }
 
-  val ndreset = IO(Bool(OUTPUT))
-  val dmactive = IO(Bool(OUTPUT))
+  val dtm = io_jtag.map { jtag => 
+    val dtm = Module(new DebugTransportModuleJTAG(p(DMKey).nDMIAddrSize, p(JtagDTMKey)))
+    dtm.io.jtag <> jtag.jtag
 
-  debug.foreach { dbg => outer.coreplex.module.io.debug <> dbg }
-
-  val dtm = jtag.map { _ => Module(new DebugTransportModuleJTAG(p(DMKey).nDMIAddrSize, p(JtagDTMKey))) }
-  dtm.foreach { dtm =>
-    dtm.io.jtag <> jtag.get
-
-    dtm.clock          := jtag.get.TCK
-    dtm.io.jtag_reset  := jtag_reset.get
-    dtm.io.jtag_mfr_id := jtag_mfr_id.get
+    dtm.clock          := jtag.jtag.TCK
+    dtm.io.jtag_reset  := jtag.reset
+    dtm.io.jtag_mfr_id := jtag.mfr_id
     dtm.reset          := dtm.io.fsmReset
 
     outer.coreplex.module.io.debug.dmi <> dtm.io.dmi
-    outer.coreplex.module.io.debug.dmiClock := jtag.get.TCK
-    outer.coreplex.module.io.debug.dmiReset := ResetCatchAndSync(jtag.get.TCK, jtag_reset.get, "dmiResetCatch")
+    outer.coreplex.module.io.debug.dmiClock := jtag.jtag.TCK
+    outer.coreplex.module.io.debug.dmiReset := ResetCatchAndSync(jtag.jtag.TCK, jtag.reset, "dmiResetCatch")
+    dtm
   }
 
-  ndreset  := outer.coreplex.module.io.ndreset
-  dmactive := outer.coreplex.module.io.dmactive
+  io_ndreset  := outer.coreplex.module.io.ndreset
+  io_dmactive := outer.coreplex.module.io.dmactive
 }
 
 /** Real-time clock is based on RTCPeriod relative to system clock.

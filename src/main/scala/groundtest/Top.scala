@@ -21,6 +21,6 @@ class GroundTestTop(implicit p: Parameters) extends BaseSystem
 
 class GroundTestTopModule[+L <: GroundTestTop](_outer: L) extends BaseSystemModule(_outer)
     with HasPeripheryMasterAXI4MemPortModuleImp {
-  val success = IO(Bool(OUTPUT))
-  success := outer.coreplex.module.io.success
+  val io_success = IO(Bool(OUTPUT))
+  io_success := outer.coreplex.module.io.success
 }

@@ -105,9 +105,9 @@ trait HasPeripherySyncExtInterrupts extends HasPeripheryExtInterrupts {
   */
 trait HasPeripheryExtInterruptsModuleImp extends LazyMultiIOModuleImp {
   val outer: HasPeripheryExtInterrupts
-  val interrupts = IO(UInt(INPUT, width = outer.nExtInterrupts))
+  val io_interrupts = IO(UInt(INPUT, width = outer.nExtInterrupts))
 
-  outer.extInterrupts.bundleIn.flatten.zipWithIndex.foreach { case(o, i) => o := interrupts(i) }
+  outer.extInterrupts.bundleIn.flatten.zipWithIndex.foreach { case(o, i) => o := io_interrupts(i) }
 }
 
 ///// The following traits add ports to the sytem, in some cases converting to different interconnect standards
@@ -155,7 +155,7 @@ trait HasPeripheryMasterAXI4MemPort extends HasSystemNetworks {
 /** Actually generates the corresponding IO in the concrete Module */
 trait HasPeripheryMasterAXI4MemPortModuleImp extends LazyMultiIOModuleImp {
   val outer: HasPeripheryMasterAXI4MemPort
-  val mem_axi4 = IO(outer.mem_axi4.bundleOut)
+  val io_mem_axi4 = IO(outer.mem_axi4.bundleOut)
 }
 
 /** Adds a AXI4 port to the system intended to master an MMIO device bus */
@@ -184,7 +184,7 @@ trait HasPeripheryMasterAXI4MMIOPort extends HasSystemNetworks {
 /** Actually generates the corresponding IO in the concrete Module */
 trait HasPeripheryMasterAXI4MMIOPortModuleImp extends LazyMultiIOModuleImp {
   val outer: HasPeripheryMasterAXI4MMIOPort
-  val mmio_axi4 = IO(outer.mmio_axi4.bundleOut)
+  val io_mmio_axi4 = IO(outer.mmio_axi4.bundleOut)
 }
 
 /** Adds an AXI4 port to the system intended to be a slave on an MMIO device bus */
@@ -207,7 +207,7 @@ trait HasPeripherySlaveAXI4Port extends HasSystemNetworks {
 /** Actually generates the corresponding IO in the concrete Module */
 trait HasPeripherySlaveAXI4PortModuleImp extends LazyMultiIOModuleImp {
   val outer: HasPeripherySlaveAXI4Port
-  val l2_frontend_bus_axi4 = IO(outer.l2FrontendAXI4Node.bundleIn)
+  val io_l2_frontend_bus_axi4 = IO(outer.l2FrontendAXI4Node.bundleIn)
 }
 
 /** Adds a TileLink port to the system intended to master an MMIO device bus */
@@ -234,7 +234,7 @@ trait HasPeripheryMasterTLMMIOPort extends HasSystemNetworks {
 /** Actually generates the corresponding IO in the concrete Module */
 trait HasPeripheryMasterTLMMIOPortModuleImp extends LazyMultiIOModuleImp {
   val outer: HasPeripheryMasterTLMMIOPort
-  val mmio_tl = IO(outer.mmio_tl.bundleOut)
+  val io_mmio_tl = IO(outer.mmio_tl.bundleOut)
 }
 
 /** Adds an AXI4 port to the system intended to be a slave on an MMIO device bus.
@@ -255,7 +255,7 @@ trait HasPeripherySlaveTLPort extends HasSystemNetworks {
 /** Actually generates the corresponding IO in the concrete Module */
 trait HasPeripherySlaveTLPortModuleImp extends LazyMultiIOModuleImp {
   val outer: HasPeripherySlaveTLPort
-  val l2_frontend_bus_tl = IO(outer.l2FrontendTLNode.bundleIn)
+  val io_l2_frontend_bus_tl = IO(outer.l2FrontendTLNode.bundleIn)
 }
 
 ///// The following traits add specific devices to the periphery of the system.
