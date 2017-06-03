@@ -18,81 +18,65 @@ trait HasCoreplexRISCVPlatform {
   val coreplex: CoreplexRISCVPlatform
 }
 
-/** Adds JTAG DTM to system, and exports JTAG interface. */
-trait HasPeripheryJTAGDTM extends HasSystemNetworks with HasCoreplexRISCVPlatform {
-  val module: HasPeripheryJTAGDTMModuleImp
-}
-
+/** A wrapper around JTAG providing a reset signal and manufacturer id. */
 class SystemJTAGIO extends Bundle {
   val jtag = new JTAGIO(hasTRSTn = false).flip
   val reset = Bool(INPUT)
   val mfr_id = UInt(INPUT, 11)
 }
 
-trait HasPeripheryJTAGDTMModuleImp extends LazyMultiIOModuleImp {
-  val outer: HasPeripheryJTAGDTM
-
-  val io_jtag = IO(new SystemJTAGIO)
-
-  val dtm = Module (new DebugTransportModuleJTAG(p(DMKey).nDMIAddrSize, p(JtagDTMKey)))
-  dtm.io.jtag <> io_jtag.jtag
-  
-  dtm.clock             := io_jtag.jtag.TCK
-  dtm.io.jtag_reset     := io_jtag.reset
-  dtm.io.jtag_mfr_id    := io_jtag.mfr_id
-  dtm.reset             := dtm.io.fsmReset
-
-  outer.coreplex.module.io.debug.dmi <> dtm.io.dmi
-  outer.coreplex.module.io.debug.dmiClock := io_jtag.jtag.TCK
-  outer.coreplex.module.io.debug.dmiReset := ResetCatchAndSync(io_jtag.jtag.TCK, io_jtag.reset, "dmiResetCatch")
+/** A wrapper bundle containing one of the two possible debug interfaces */
+class DebugIO(implicit p: Parameters) extends ParameterizedBundle()(p) {
+  val dmi        = (!p(IncludeJtagDTM)).option(new ClockedDMIIO().flip)
+  val systemjtag = (p(IncludeJtagDTM)).option(new SystemJTAGIO)
+  val ndreset    = Bool(OUTPUT)
+  val dmactive   = Bool(OUTPUT)
 }
 
-/** Adds Debug Module Interface (DMI) to systeme. Any sort of DTM
-  * can be connected outside. DMI Clock and Reset must be provided.
+/** Either adds a JTAG DTM to system, and exports a JTAG interface,
+  * or exports the Debug Module Interface (DMI), based on a global parameter.
   */
-trait HasPeripheryDMI extends HasSystemNetworks with HasCoreplexRISCVPlatform {
-  val module: HasPeripheryDMIModuleImp
-}
-
-trait HasPeripheryDMIModuleImp extends LazyMultiIOModuleImp {
-  val outer: HasPeripheryDMI
-  val io_debug = IO(new ClockedDMIIO().flip)
-
-  outer.coreplex.module.io.debug <> io_debug
-}
-
-/** Add DMI or JTAG interface to system based on a global parameter */
 trait HasPeripheryDebug extends HasSystemNetworks with HasCoreplexRISCVPlatform {
   val module: HasPeripheryDebugModuleImp
 }
 
-trait HasPeripheryDebugModuleImp extends LazyMultiIOModuleImp {
+trait HasPeripheryDebugBundle extends HasPeripheryParameters {
+  val debug: DebugIO
+  def connectDebug(c: Clock, r: Bool, out: Bool) {
+    debug.dmi.foreach { d =>
+      val dtm = Module(new SimDTM).connect(c, r, d, out)
+    }
+    debug.systemjtag.foreach { sj =>
+      val jtag = Module(new JTAGVPI).connect(sj.jtag, sj.reset, r, out)
+      sj.mfr_id := p(JtagDTMKey).idcodeManufId.U(11.W)
+    }
+  }
+}
+
+trait HasPeripheryDebugModuleImp extends LazyMultiIOModuleImp with HasPeripheryDebugBundle {
   val outer: HasPeripheryDebug
 
-  val io_debug = (!p(IncludeJtagDTM)).option(IO(new ClockedDMIIO().flip))
-  val io_jtag  = (p(IncludeJtagDTM)).option(IO(new SystemJTAGIO))
-  val io_ndreset = IO(Bool(OUTPUT))
-  val io_dmactive = IO(Bool(OUTPUT))
+  val debug = IO(new DebugIO)
 
-  io_debug.foreach { dbg => outer.coreplex.module.io.debug <> dbg }
+  debug.dmi.foreach { dbg => outer.coreplex.module.io.debug <> dbg }
 
-  val dtm = io_jtag.map { jtag => 
+  val dtm = debug.systemjtag.map { sj => 
     val dtm = Module(new DebugTransportModuleJTAG(p(DMKey).nDMIAddrSize, p(JtagDTMKey)))
-    dtm.io.jtag <> jtag.jtag
+    dtm.io.jtag <> sj.jtag
 
-    dtm.clock          := jtag.jtag.TCK
-    dtm.io.jtag_reset  := jtag.reset
-    dtm.io.jtag_mfr_id := jtag.mfr_id
+    dtm.clock          := sj.jtag.TCK
+    dtm.io.jtag_reset  := sj.reset
+    dtm.io.jtag_mfr_id := sj.mfr_id
     dtm.reset          := dtm.io.fsmReset
 
     outer.coreplex.module.io.debug.dmi <> dtm.io.dmi
-    outer.coreplex.module.io.debug.dmiClock := jtag.jtag.TCK
-    outer.coreplex.module.io.debug.dmiReset := ResetCatchAndSync(jtag.jtag.TCK, jtag.reset, "dmiResetCatch")
+    outer.coreplex.module.io.debug.dmiClock := sj.jtag.TCK
+    outer.coreplex.module.io.debug.dmiReset := ResetCatchAndSync(sj.jtag.TCK, sj.reset, "dmiResetCatch")
     dtm
   }
 
-  io_ndreset  := outer.coreplex.module.io.ndreset
-  io_dmactive := outer.coreplex.module.io.dmactive
+  debug.ndreset  := outer.coreplex.module.io.ndreset
+  debug.dmactive := outer.coreplex.module.io.dmactive
 }
 
 /** Real-time clock is based on RTCPeriod relative to system clock.

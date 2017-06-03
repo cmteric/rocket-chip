@@ -43,6 +43,7 @@ trait HasPeripheryParameters {
   def cacheBlockBytes = p(CacheBlockBytes)
   def peripheryBusArithmetic = p(PeripheryBusArithmetic)
   def nMemoryChannels = p(coreplex.BankedL2Config).nMemoryChannels
+  def nExtInterrupts = p(NExtTopInterrupts)
 }
 
 /** HasSystemNetworks provides buses that will serve as attachment points,
@@ -76,7 +77,6 @@ abstract trait HasPeripheryExtInterrupts extends HasSystemNetworks {
     }
   }
 
-  val nExtInterrupts = p(NExtTopInterrupts)
   val extInterrupts = IntInternalInputNode(IntSourcePortSimple(num = nExtInterrupts, resources = device.int))
 }
 
@@ -100,14 +100,22 @@ trait HasPeripherySyncExtInterrupts extends HasPeripheryExtInterrupts {
   }
 }
 
+/** Common io name and methods for propagating or tying off the port bundle */
+trait HasPeripheryExtInterruptsBundle extends HasPeripheryParameters {
+  val interrupts: UInt
+  def tieOffInterrupts(dummy: Int = 1) {
+    interrupts := UInt(0)
+  }
+}
+
 /** This trait performs the translation from a UInt IO into Diplomatic Interrupts.
   * The wiring must be done in the concrete LazyModuleImp. 
   */
-trait HasPeripheryExtInterruptsModuleImp extends LazyMultiIOModuleImp {
+trait HasPeripheryExtInterruptsModuleImp extends LazyMultiIOModuleImp with HasPeripheryExtInterruptsBundle {
   val outer: HasPeripheryExtInterrupts
-  val io_interrupts = IO(UInt(INPUT, width = outer.nExtInterrupts))
+  val interrupts = IO(UInt(INPUT, width = outer.nExtInterrupts))
 
-  outer.extInterrupts.bundleIn.flatten.zipWithIndex.foreach { case(o, i) => o := io_interrupts(i) }
+  outer.extInterrupts.bundleIn.flatten.zipWithIndex.foreach { case(o, i) => o := interrupts(i) }
 }
 
 ///// The following traits add ports to the sytem, in some cases converting to different interconnect standards
@@ -152,10 +160,18 @@ trait HasPeripheryMasterAXI4MemPort extends HasSystemNetworks {
   }
 }
 
+/** Common io name and methods for propagating or tying off the port bundle */
+trait HasPeripheryMasterAXI4MemPortBundle extends HasPeripheryParameters {
+  val mem_axi4: HeterogeneousBag[AXI4Bundle]
+  def connectSimAXIMem(dummy: Int = 1) = {
+    if (nMemoryChannels > 0) Module(LazyModule(new SimAXIMem(nMemoryChannels)).module).io.axi4 <> mem_axi4
+  }
+}
+
 /** Actually generates the corresponding IO in the concrete Module */
-trait HasPeripheryMasterAXI4MemPortModuleImp extends LazyMultiIOModuleImp {
+trait HasPeripheryMasterAXI4MemPortModuleImp extends LazyMultiIOModuleImp with HasPeripheryMasterAXI4MemPortBundle {
   val outer: HasPeripheryMasterAXI4MemPort
-  val io_mem_axi4 = IO(outer.mem_axi4.bundleOut)
+  val mem_axi4 = IO(outer.mem_axi4.bundleOut)
 }
 
 /** Adds a AXI4 port to the system intended to master an MMIO device bus */
@@ -181,10 +197,18 @@ trait HasPeripheryMasterAXI4MMIOPort extends HasSystemNetworks {
     socBus.node))))))
 }
 
+/** Common io name and methods for propagating or tying off the port bundle */
+trait HasPeripheryMasterAXI4MMIOPortBundle extends HasPeripheryParameters {
+  val mmio_axi4: HeterogeneousBag[AXI4Bundle]
+  def connectSimAXIMMIO(dummy: Int = 1) {
+    Module(LazyModule(new SimAXIMem(1, 4096)).module).io.axi4 <> mmio_axi4
+  }
+}
+
 /** Actually generates the corresponding IO in the concrete Module */
-trait HasPeripheryMasterAXI4MMIOPortModuleImp extends LazyMultiIOModuleImp {
+trait HasPeripheryMasterAXI4MMIOPortModuleImp extends LazyMultiIOModuleImp with HasPeripheryMasterAXI4MMIOPortBundle {
   val outer: HasPeripheryMasterAXI4MMIOPort
-  val io_mmio_axi4 = IO(outer.mmio_axi4.bundleOut)
+  val mmio_axi4 = IO(outer.mmio_axi4.bundleOut)
 }
 
 /** Adds an AXI4 port to the system intended to be a slave on an MMIO device bus */
@@ -204,10 +228,24 @@ trait HasPeripherySlaveAXI4Port extends HasSystemNetworks {
     l2FrontendAXI4Node)))))
 }
 
+/** Common io name and methods for propagating or tying off the port bundle */
+trait HasPeripherySlaveAXI4PortBundle extends HasPeripheryParameters {
+  val l2_frontend_bus_axi4: HeterogeneousBag[AXI4Bundle]
+  def tieOffAXI4SlavePort(dummy: Int = 1) {
+    l2_frontend_bus_axi4.foreach { l2_axi4 =>
+      l2_axi4.ar.valid := Bool(false)
+      l2_axi4.aw.valid := Bool(false)
+      l2_axi4.w .valid := Bool(false)
+      l2_axi4.r .ready := Bool(true)
+      l2_axi4.b .ready := Bool(true)
+    }
+  }
+}
+
 /** Actually generates the corresponding IO in the concrete Module */
-trait HasPeripherySlaveAXI4PortModuleImp extends LazyMultiIOModuleImp {
+trait HasPeripherySlaveAXI4PortModuleImp extends LazyMultiIOModuleImp with HasPeripherySlaveAXI4PortBundle {
   val outer: HasPeripherySlaveAXI4Port
-  val io_l2_frontend_bus_axi4 = IO(outer.l2FrontendAXI4Node.bundleIn)
+  val l2_frontend_bus_axi4 = IO(outer.l2FrontendAXI4Node.bundleIn)
 }
 
 /** Adds a TileLink port to the system intended to master an MMIO device bus */
@@ -231,10 +269,24 @@ trait HasPeripheryMasterTLMMIOPort extends HasSystemNetworks {
     socBus.node)))
 }
 
+/** Common io name and methods for propagating or tying off the port bundle */
+trait HasPeripheryMasterTLMMIOPortBundle extends HasPeripheryParameters {
+  val mmio_tl: HeterogeneousBag[TLBundle]
+  def tieOffTLMMIO(dummy: Int = 1) {
+    mmio_tl.foreach { tl =>
+      tl.a.ready := Bool(true)
+      tl.b.valid := Bool(false)
+      tl.c.ready := Bool(true)
+      tl.d.valid := Bool(false)
+      tl.e.ready := Bool(true)
+    }
+  }
+}
+
 /** Actually generates the corresponding IO in the concrete Module */
-trait HasPeripheryMasterTLMMIOPortModuleImp extends LazyMultiIOModuleImp {
+trait HasPeripheryMasterTLMMIOPortModuleImp extends LazyMultiIOModuleImp with HasPeripheryMasterTLMMIOPortBundle {
   val outer: HasPeripheryMasterTLMMIOPort
-  val io_mmio_tl = IO(outer.mmio_tl.bundleOut)
+  val mmio_tl = IO(outer.mmio_tl.bundleOut)
 }
 
 /** Adds an AXI4 port to the system intended to be a slave on an MMIO device bus.
@@ -252,10 +304,24 @@ trait HasPeripherySlaveTLPort extends HasSystemNetworks {
     l2FrontendTLNode))
 }
 
+/** Common io name and methods for propagating or tying off the port bundle */
+trait HasPeripherySlaveTLPortBundle extends HasPeripheryParameters {
+  val l2_frontend_bus_tl: HeterogeneousBag[TLBundle]
+  def tieOffSlaveTLPort(dummy: Int = 1) {
+    l2_frontend_bus_tl.foreach { tl =>
+      tl.a.valid := Bool(false)
+      tl.b.ready := Bool(true)
+      tl.c.valid := Bool(false)
+      tl.d.ready := Bool(true)
+      tl.e.valid := Bool(false)
+    }
+  }
+}
+
 /** Actually generates the corresponding IO in the concrete Module */
-trait HasPeripherySlaveTLPortModuleImp extends LazyMultiIOModuleImp {
+trait HasPeripherySlaveTLPortModuleImp extends LazyMultiIOModuleImp with HasPeripherySlaveTLPortBundle {
   val outer: HasPeripherySlaveTLPort
-  val io_l2_frontend_bus_tl = IO(outer.l2FrontendTLNode.bundleIn)
+  val l2_frontend_bus_tl = IO(outer.l2FrontendTLNode.bundleIn)
 }
 
 ///// The following traits add specific devices to the periphery of the system.
